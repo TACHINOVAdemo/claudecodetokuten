@@ -1,13 +1,33 @@
-// トレイ・ウィンドウ・デスクトップショートカット用のプレースホルダーアイコンを生成する。
-// 依存パッケージなしで、単色角丸スクエアのPNG(build/icon.png)と、
-// デスクトップショートカットのアイコンに使うICO(build/icon.ico、複数解像度のPNGを内包)を直接組み立てる。
-// 本物のロゴに差し替えたい場合は build/icon.png / build/icon.ico を直接置き換えればよい。
+// トレイ・ウィンドウ・デスクトップショートカット用のアイコンを生成する。
+// 依存パッケージなしで、PNG(build/icon.png)と、デスクトップショートカットのアイコンに使う
+// ICO(build/icon.ico、複数解像度のPNGを内包)を直接組み立てる。
+//
+// 意匠: 青のグラデーションを敷いた角丸スクエアに、白い再生マーク(三角形)と、
+//       その左に小さな白丸を置いたもの。「登録したものをまとめて開く(再生する)」を表す。
+// 図形はすべて座標式で描いているため、16pxでも256pxでも輪郭が崩れない。
+// 別のロゴに差し替えたい場合は、生成後の build/icon.png / build/icon.ico を直接置き換えればよい。
 import { deflateSync } from 'node:zlib'
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 
 const ICO_SIZES = [16, 32, 48, 256]
 const WINDOW_ICON_SIZE = 256
-const COLOR = [27, 79, 145, 255] // #1b4f91
+
+// --- 意匠のパラメータ(すべて一辺に対する比率。size を変えても見た目が保たれる) ---
+const CORNER_RADIUS = 0.2 // 角丸の半径
+const GRADIENT_FROM = [59, 130, 246] // 左上の青 #3b82f6
+const GRADIENT_TO = [21, 82, 220] // 右下の青 #1552dc
+const MARK = [255, 255, 255] // 再生マーク・丸の色
+
+const DOT_CENTER = [0.275, 0.5]
+const DOT_RADIUS = 0.045
+const TRIANGLE = [
+  [0.395, 0.262], // 左上
+  [0.395, 0.738], // 左下
+  [0.755, 0.5], // 右の頂点
+]
+
+// 1ピクセルあたり SUPERSAMPLE^2 点を評価して輪郭を滑らかにする(アンチエイリアス)。
+const SUPERSAMPLE = 4
 
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256)
@@ -38,29 +58,81 @@ function chunk(type, data) {
   return Buffer.concat([lenBuf, typeBuf, data, crcBuf])
 }
 
+// u, v は 0..1 に正規化した座標。以降の図形判定はすべてこの座標系で行う。
+function insideRoundedSquare(u, v) {
+  const r = CORNER_RADIUS
+  const cx = Math.min(Math.max(u, r), 1 - r)
+  const cy = Math.min(Math.max(v, r), 1 - r)
+  const dx = u - cx
+  const dy = v - cy
+  return dx * dx + dy * dy <= r * r
+}
+
+function insideDot(u, v) {
+  const dx = u - DOT_CENTER[0]
+  const dy = v - DOT_CENTER[1]
+  return dx * dx + dy * dy <= DOT_RADIUS * DOT_RADIUS
+}
+
+function insideTriangle(u, v) {
+  // 3辺それぞれについて、点が同じ側にあるかを外積の符号で判定する。
+  const [a, b, c] = TRIANGLE
+  const cross = (p, q) => (q[0] - p[0]) * (v - p[1]) - (q[1] - p[1]) * (u - p[0])
+  const d1 = cross(a, b)
+  const d2 = cross(b, c)
+  const d3 = cross(c, a)
+  const hasNeg = d1 < 0 || d2 < 0 || d3 < 0
+  const hasPos = d1 > 0 || d2 > 0 || d3 > 0
+  return !(hasNeg && hasPos)
+}
+
+function gradientAt(u, v) {
+  // 左上から右下へ向かう対角グラデーション。
+  const t = Math.min(Math.max((u + v) / 2, 0), 1)
+  return [
+    Math.round(GRADIENT_FROM[0] + (GRADIENT_TO[0] - GRADIENT_FROM[0]) * t),
+    Math.round(GRADIENT_FROM[1] + (GRADIENT_TO[1] - GRADIENT_FROM[1]) * t),
+    Math.round(GRADIENT_FROM[2] + (GRADIENT_TO[2] - GRADIENT_FROM[2]) * t),
+  ]
+}
+
 function makePng(size) {
-  const radius = Math.round(size * 0.08)
-
-  function insideRoundedSquare(x, y) {
-    const cx = Math.min(Math.max(x, radius), size - 1 - radius)
-    const cy = Math.min(Math.max(y, radius), size - 1 - radius)
-    const dx = x - cx
-    const dy = y - cy
-    return dx * dx + dy * dy <= radius * radius
-  }
-
   const rowBytes = size * 4
   const raw = Buffer.alloc((rowBytes + 1) * size)
+  const samples = SUPERSAMPLE * SUPERSAMPLE
+
   for (let y = 0; y < size; y++) {
     const rowStart = y * (rowBytes + 1)
     raw[rowStart] = 0 // フィルタなし
     for (let x = 0; x < size; x++) {
+      let covered = 0
+      let sumR = 0
+      let sumG = 0
+      let sumB = 0
+
+      for (let sy = 0; sy < SUPERSAMPLE; sy++) {
+        for (let sx = 0; sx < SUPERSAMPLE; sx++) {
+          const u = (x + (sx + 0.5) / SUPERSAMPLE) / size
+          const v = (y + (sy + 0.5) / SUPERSAMPLE) / size
+          if (!insideRoundedSquare(u, v)) continue
+
+          covered++
+          const color = insideDot(u, v) || insideTriangle(u, v) ? MARK : gradientAt(u, v)
+          sumR += color[0]
+          sumG += color[1]
+          sumB += color[2]
+        }
+      }
+
       const off = rowStart + 1 + x * 4
-      const inside = insideRoundedSquare(x, y)
-      raw[off] = COLOR[0]
-      raw[off + 1] = COLOR[1]
-      raw[off + 2] = COLOR[2]
-      raw[off + 3] = inside ? COLOR[3] : 0
+      if (covered === 0) {
+        // 角の外側は完全な透明。RGBも0にしておく(縮小時の色にじみを避ける)。
+        continue
+      }
+      raw[off] = Math.round(sumR / covered)
+      raw[off + 1] = Math.round(sumG / covered)
+      raw[off + 2] = Math.round(sumB / covered)
+      raw[off + 3] = Math.round((covered / samples) * 255)
     }
   }
 
@@ -112,6 +184,8 @@ function makeIco(sizes) {
 
   return Buffer.concat([header, ...entries, ...dataParts])
 }
+
+mkdirSync(new URL('../build/', import.meta.url), { recursive: true })
 
 writeFileSync(new URL('../build/icon.png', import.meta.url), makePng(WINDOW_ICON_SIZE))
 console.log('build/icon.png を生成しました')

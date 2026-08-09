@@ -23,7 +23,6 @@ pnpm-debug.log*
 .pnpm-store/
 dist/
 out/
-build/
 release/
 *.asar
 
