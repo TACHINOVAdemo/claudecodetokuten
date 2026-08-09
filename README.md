@@ -2,15 +2,15 @@
 
 仕事の種類ごとに、いつも開くWebページ・ファイル・フォルダをまとめて登録しておき、ボタン一つで全部開くための常駐型デスクトップアプリです。**Windows 10/11 と macOS** で動きます。
 
-Claude Code を使ったセミナーのデモとして作られたアプリで、このリポジトリには仕様書と実装の両方が入っています。
+Claude Code を使ったセミナーのデモとして作られたアプリです。
 
 ## このリポジトリの中身
 
 | パス | 内容 |
 |---|---|
-| [`REQUIREMENTS.md`](REQUIREMENTS.md) | 仕様書。何を作るかを日本語で書き下したもの |
 | [`ClaudeCodeSeminarDemoApp/`](ClaudeCodeSeminarDemoApp/) | 実装（Electronアプリ本体） |
 | [`ClaudeCodeSeminarDemoApp/README.md`](ClaudeCodeSeminarDemoApp/README.md) | アプリの詳しい説明・使い方・安全設計 |
+| [`ClaudeCodeSeminarDemoApp/.claude/CLAUDE.md`](ClaudeCodeSeminarDemoApp/.claude/CLAUDE.md) | 技術方針と安全ルール。Claude Code に改造を頼むときに読ませるもの |
 
 ## 受け取った人がまず読むもの
 
